@@ -1,0 +1,220 @@
+{
+  "name": "01 Mini Register - FIXED",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mini-register",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-01",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [ 0, 0 ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "yqgVhIclZEnuWmbW",
+          "name": "test_sendgrid"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst email = (body.email || '').trim().toLowerCase();\nconst password = body.password || '';\nconst name = body.name || '';\n\nif (!email || !email.includes('@')) {\n  throw new Error('Invalid email');\n}\nif (password.length < 6) {\n  throw new Error('Password too short');\n}\nif (!name) {\n  throw new Error('Name required');\n}\n\nreturn [{ json: { email, password, name } }];"
+      },
+      "id": "validate-01",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [ 640, 0 ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM users WHERE email = $1 LIMIT 1",
+        "options": {
+          "queryReplacement": "={{ $json.email }}"
+        }
+      },
+      "id": "check-email-01",
+      "name": "Check Email Exists",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [ 1056, 0 ],
+      "credentials": {
+        "postgres": {
+          "id": "v74gd4arX1QnD9rH",
+          "name": "test_pg"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const bcrypt = require('bcryptjs');\nconst password = $input.first().json.password;\nconst hash = bcrypt.hashSync(password, 8);\nconst code = String(Math.floor(100000 + Math.random() * 900000));\nreturn [{ json: { password_hash: hash, code } }];"
+      },
+      "id": "hash-01",
+      "name": "Hash Password",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [ 1472, 0 ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id",
+        "options": {
+          "queryReplacement": "={{ $json.email }}, {{ $json.password_hash }}"
+        }
+      },
+      "id": "insert-user-01",
+      "name": "Insert User",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [ 1648, 0 ],
+      "credentials": {
+        "postgres": {
+          "id": "v74gd4arX1QnD9rH",
+          "name": "test_pg"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO verification_codes (user_id, code, expires_at) VALUES ($1, $2, NOW() + INTERVAL '30 minutes')",
+        "options": {
+          "queryReplacement": "={{ $('Insert User').first().json.id }}, {{ $('Hash Password').first().json.code }}"
+        }
+      },
+      "id": "save-code-01",
+      "name": "Save Code",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [ 2064, 0 ],
+      "credentials": {
+        "postgres": {
+          "id": "v74gd4arX1QnD9rH",
+          "name": "test_pg"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.sendgrid.com/v3/mail/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "yqgVhIclZEnuWmbW",
+            "name": "test_sendgrid"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"personalizations\": [{ \"to\": [{ \"email\": \"{{ $('Validate Input').first().json.email }}\" }] }],\n  \"from\": { \"email\": \"noreply@example.com\" },\n  \"subject\": \"Your verification code\",\n  \"content\": [{ \"type\": \"text/plain\", \"value\": \"Your code: {{ $('Hash Password').first().json.code }}\" }]\n}"
+      },
+      "id": "send-email-01",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [ 2496, 0 ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"message\": \"Verification code sent\" }"
+      },
+      "id": "respond-ok-01",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [ 2992, 0 ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Check Email Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Email Exists": {
+      "main": [
+        [
+          {
+            "node": "Hash Password",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash Password": {
+      "main": [
+        [
+          {
+            "node": "Insert User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert User": {
+      "main": [
+        [
+          {
+            "node": "Save Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Code": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

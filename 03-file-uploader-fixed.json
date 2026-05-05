@@ -1,0 +1,134 @@
+{
+  "name": "03 File Uploader - FIXED",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "upload",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-03",
+      "name": "Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [ 288, 656 ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "test_sendgrid"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const headers = $input.first().json.headers || {};\nconst sizeStr = headers['content-length'] || headers['Content-Length'] || '0';\nconst sizeMb = parseInt(sizeStr, 10) / 1024 / 1024;\nconst MAX_MB = 10;\n\n// Проверка типа файла\nconst filename = $input.first().json.body?.filename || 'unknown';\nconst allowedExtensions = ['.jpg', '.jpeg', '.png', '.pdf', '.docx'];\nconst fileExtension = '.' + filename.split('.').pop().toLowerCase();\n\nif (!allowedExtensions.includes(fileExtension)) {\n  throw new Error(`Invalid file type: ${fileExtension}. Allowed: ${allowedExtensions.join(', ')}`);\n}\n\n// Санитизация имени\nconst safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');\n\nif (sizeMb > MAX_MB) {\n  throw new Error(`File too large: ${sizeMb.toFixed(1)} MB > ${MAX_MB} MB`);\n}\n\nconst body = $input.first().json.body || {};\n\nreturn [{ \n  json: { \n    filename: safeFilename, \n    user_id: body.user_id || null, \n    size_bytes: parseInt(sizeStr, 10) \n  } \n}];"
+      },
+      "id": "check-size-03",
+      "name": "Check Size",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [ 1248, 656 ]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "bucketName": "uploads",
+        "fileName": "={{ $json.filename }}",
+        "additionalFields": {}
+      },
+      "id": "upload-s3-03",
+      "name": "Upload to S3",
+      "type": "n8n-nodes-base.s3",
+      "typeVersion": 1,
+      "position": [ 1456, 656 ],
+      "credentials": {
+        "s3": {
+          "name": "test_s3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO files (user_id, filename, s3_key, size_bytes) VALUES ($1, $2, $3, $4) RETURNING id",
+        "options": {
+          "queryReplacement": "={{ $json.user_id }}, {{ $json.filename }}, 'uploads/{{ $json.filename }}', {{ $json.size_bytes }}"
+        }
+      },
+      "id": "save-file-03",
+      "name": "Save File Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [ 1680, 656 ],
+      "credentials": {
+        "postgres": {
+          "name": "test_pg"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"url\": \"http://localhost:9000/uploads/{{ $json.filename }}\" }",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-ok-03",
+      "name": "Respond OK1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [ 2640, 656 ]
+    }
+  ],
+  "connections": {
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Check Size",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Size": {
+      "main": [
+        [
+          {
+            "node": "Upload to S3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to S3": {
+      "main": [
+        [
+          {
+            "node": "Save File Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save File Record": {
+      "main": [
+        [
+          {
+            "node": "Respond OK1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

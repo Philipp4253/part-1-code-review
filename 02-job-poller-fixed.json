@@ -1,0 +1,165 @@
+{
+  "name": "02 Job Poller - FIXED",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */5 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-02",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [ 320, 320 ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, external_id FROM jobs WHERE status = 'pending' ORDER BY id ASC LIMIT 5",
+        "options": {}
+      },
+      "id": "get-jobs-02",
+      "name": "Get Pending Jobs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [ 1000, 320 ],
+      "credentials": {
+        "postgres": {
+          "name": "test_pg"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "85777e93",
+              "name": "id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "temp-id",
+              "name": "external_id",
+              "value": "={{ $json.external_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "edit-fields-02",
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [ 1200, 320 ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.example.com/jobs/{{ $json.external_id }}/status"
+      },
+      "id": "check-status-02",
+      "name": "Check External Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [ 1424, 320 ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const status = $json.status || 'pending';\n// Берем ID из текущих данных (благодаря Edit Fields)\nconst id = $json.id; \n\nreturn [{ \n  json: { \n    id, \n    new_status: status \n  }  \n}];"
+      },
+      "id": "map-status-02",
+      "name": "Map Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [ 1648, 320 ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE jobs SET status = $1, last_checked_at = NOW() WHERE id = $2",
+        "options": {
+          "queryReplacement": "={{ $json.new_status }}, {{ $json.id }}"
+        }
+      },
+      "id": "update-job-02",
+      "name": "Update Job",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [ 2528, 320 ],
+      "credentials": {
+        "postgres": {
+          "name": "test_pg"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Pending Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Jobs": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Check External Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check External Status": {
+      "main": [
+        [
+          {
+            "node": "Map Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Status": {
+      "main": [
+        [
+          {
+            "node": "Update Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
